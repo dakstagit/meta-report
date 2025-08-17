@@ -1,67 +1,56 @@
-import express from "express";
-import fs from "fs";
-import path from "path";
-import cors from "cors";
+import express from 'express';
+import bodyParser from 'body-parser';
+import cors from 'cors';
+import 'dotenv/config';
+import OpenAI from 'openai';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const port = process.env.PORT || 3000;
 
-// Middleware
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
+
 app.use(cors());
-app.use(express.json());
+app.use(bodyParser.json());
 
-// Resolve paths
-const __dirname = path.resolve();
-const META_FILE = path.join(__dirname, "backend", "meta.js");
-const STORAGE_FILE = path.join(__dirname, "backend", "storage.json");
+app.post('/analyze', async (req, res) => {
+  const { campaignName, impressions, clicks, cpc, ctr, spend, purchases, roas, addToCart, country, objective, platform } = req.body;
 
-// Load meta data
-let metaData = {};
-try {
-  metaData = (await import(`file://${META_FILE}`)).default;
-} catch (err) {
-  console.error("Failed to load meta.js:", err);
-  metaData = {};
-}
+  const prompt = `
+You are an expert digital marketing analyst. Analyze the performance of this ${platform} advertising campaign for ${country}. The objective was ${objective}. Use the following metrics:
 
-// Load stored brands
-function loadStoredBrands() {
+Campaign Name: ${campaignName}
+Impressions: ${impressions}
+Clicks: ${clicks}
+CPC: ${cpc}
+CTR: ${ctr}
+Spend: ${spend}
+Purchases: ${purchases}
+ROAS: ${roas}
+Add to Carts: ${addToCart}
+
+Give a concise but insightful report. Structure the output like this:
+
+1. Campaign Overview
+2. Performance Summary
+3. Key Insights
+4. Recommendations & Next Steps
+`;
+
   try {
-    const raw = fs.readFileSync(STORAGE_FILE, "utf-8");
-    return JSON.parse(raw);
-  } catch {
-    return [];
+    const completion = await openai.chat.completions.create({
+      messages: [{ role: 'user', content: prompt }],
+      model: 'gpt-4'
+    });
+
+    res.json({ result: completion.choices[0].message.content });
+  } catch (error) {
+    console.error('Error generating analysis:', error);
+    res.status(500).json({ error: 'Failed to generate analysis' });
   }
-}
-
-// Save brands to storage.json
-function saveStoredBrands(brands) {
-  fs.writeFileSync(STORAGE_FILE, JSON.stringify(brands, null, 2), "utf-8");
-}
-
-// Endpoint to get combined data
-app.get("/api/brands", (req, res) => {
-  const storedBrands = loadStoredBrands();
-  const combined = [...storedBrands, ...metaData];
-  res.json(combined);
 });
 
-// Endpoint to submit new brands
-app.post("/api/brands", (req, res) => {
-  const { name, country, start_date, url } = req.body;
-  if (!name || !country || !start_date || !url) {
-    return res.status(400).json({ error: "Missing required fields" });
-  }
-
-  const newBrand = { name, country, start_date, url };
-  const storedBrands = loadStoredBrands();
-  storedBrands.push(newBrand);
-  saveStoredBrands(storedBrands);
-
-  res.status(200).json({ success: true });
-});
-
-// Start server
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
 });
