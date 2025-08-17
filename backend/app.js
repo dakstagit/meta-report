@@ -1,15 +1,21 @@
 console.log("App.js is starting...");
 
-const express = require("express");
-const fs = require("fs");
-const cors = require("cors");
+import express from "express";
+import fs from "fs";
+import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
 
-const STORAGE_FILE = __dirname + "/storage.json";
+const STORAGE_FILE = path.join(__dirname, "storage.json");
 
 // Helper to read the last report date
 function getLastReportDate() {
@@ -51,4 +57,3 @@ app.post("/generate-report", (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
