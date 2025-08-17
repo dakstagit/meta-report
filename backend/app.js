@@ -1,76 +1,67 @@
-// app.js
-const express = require("express");
-const { google } = require("googleapis");
-const fs = require("fs");
-const path = require("path");
-const { getToken, saveToken } = require("./storage");
+import express from "express";
+import fs from "fs";
+import path from "path";
+import cors from "cors";
 
 const app = express();
-const port = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 
-const SCOPES = ["https://www.googleapis.com/auth/drive.file"];
+// Middleware
+app.use(cors());
+app.use(express.json());
 
-const CREDENTIALS_PATH = path.join(__dirname, "credentials.json");
+// Resolve paths
+const __dirname = path.resolve();
+const META_FILE = path.join(__dirname, "backend", "meta.js");
+const STORAGE_FILE = path.join(__dirname, "backend", "storage.json");
 
-async function authorize() {
-  const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH));
-  const { client_secret, client_id, redirect_uris } = credentials.installed;
-
-  const oAuth2Client = new google.auth.OAuth2(
-    client_id,
-    client_secret,
-    redirect_uris[0]
-  );
-
-  const token = getToken();
-  if (token) {
-    oAuth2Client.setCredentials(token);
-  } else {
-    const authUrl = oAuth2Client.generateAuthUrl({
-      access_type: "offline",
-      scope: SCOPES,
-    });
-    console.log("Authorize this app by visiting this url:", authUrl);
-    return;
-  }
-
-  return oAuth2Client;
+// Load meta data
+let metaData = {};
+try {
+  metaData = (await import(`file://${META_FILE}`)).default;
+} catch (err) {
+  console.error("Failed to load meta.js:", err);
+  metaData = {};
 }
 
-async function uploadFile(auth) {
-  const drive = google.drive({ version: "v3", auth });
-  const fileMetadata = {
-    name: "sample.txt",
-  };
-  const media = {
-    mimeType: "text/plain",
-    body: fs.createReadStream("sample.txt"),
-  };
-
-  const res = await drive.files.create({
-    resource: fileMetadata,
-    media: media,
-    fields: "id",
-  });
-
-  console.log("File ID:", res.data.id);
-}
-
-app.get("/", async (req, res) => {
-  const auth = await authorize();
-  if (!auth) {
-    return res.send("Auth URL logged to console.");
-  }
-
+// Load stored brands
+function loadStoredBrands() {
   try {
-    await uploadFile(auth);
-    res.send("File uploaded to Google Drive");
-  } catch (err) {
-    console.error("Error uploading file:", err);
-    res.status(500).send("Upload failed.");
+    const raw = fs.readFileSync(STORAGE_FILE, "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return [];
   }
+}
+
+// Save brands to storage.json
+function saveStoredBrands(brands) {
+  fs.writeFileSync(STORAGE_FILE, JSON.stringify(brands, null, 2), "utf-8");
+}
+
+// Endpoint to get combined data
+app.get("/api/brands", (req, res) => {
+  const storedBrands = loadStoredBrands();
+  const combined = [...storedBrands, ...metaData];
+  res.json(combined);
 });
 
-app.listen(port, () => {
-  console.log(`Server running on http://localhost:${port}`);
+// Endpoint to submit new brands
+app.post("/api/brands", (req, res) => {
+  const { name, country, start_date, url } = req.body;
+  if (!name || !country || !start_date || !url) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  const newBrand = { name, country, start_date, url };
+  const storedBrands = loadStoredBrands();
+  storedBrands.push(newBrand);
+  saveStoredBrands(storedBrands);
+
+  res.status(200).json({ success: true });
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
