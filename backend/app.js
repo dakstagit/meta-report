@@ -1,78 +1,76 @@
-console.log("App.js is starting...");
-
-import express from "express";
-import fs from "fs";
-import cors from "cors";
-import path from "path";
-import { fileURLToPath } from "url";
-
-// Set up __dirname for ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// app.js
+const express = require("express");
+const { google } = require("googleapis");
+const fs = require("fs");
+const path = require("path");
+const { getToken, saveToken } = require("./storage");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const port = process.env.PORT || 3000;
 
-app.use(cors());
-app.use(express.json());
+const SCOPES = ["https://www.googleapis.com/auth/drive.file"];
 
-// Path to the JSON file used to store the last report date
-const STORAGE_FILE = path.join(__dirname, "storage.json");
+const CREDENTIALS_PATH = path.join(__dirname, "credentials.json");
 
-// Helper to get the last saved report date from file
-function getLastReportDate() {
-  if (!fs.existsSync(STORAGE_FILE)) return null;
-  try {
-    const data = JSON.parse(fs.readFileSync(STORAGE_FILE, "utf-8"));
-    return data.lastReportDate || null;
-  } catch (error) {
-    console.error("Error reading storage file:", error);
-    return null;
+async function authorize() {
+  const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH));
+  const { client_secret, client_id, redirect_uris } = credentials.installed;
+
+  const oAuth2Client = new google.auth.OAuth2(
+    client_id,
+    client_secret,
+    redirect_uris[0]
+  );
+
+  const token = getToken();
+  if (token) {
+    oAuth2Client.setCredentials(token);
+  } else {
+    const authUrl = oAuth2Client.generateAuthUrl({
+      access_type: "offline",
+      scope: SCOPES,
+    });
+    console.log("Authorize this app by visiting this url:", authUrl);
+    return;
   }
+
+  return oAuth2Client;
 }
 
-// Helper to save the current date as last report generation
-function saveReportDate() {
-  const data = { lastReportDate: new Date().toISOString() };
-  try {
-    fs.writeFileSync(STORAGE_FILE, JSON.stringify(data, null, 2));
-  } catch (error) {
-    console.error("Error writing to storage file:", error);
-  }
-}
+async function uploadFile(auth) {
+  const drive = google.drive({ version: "v3", auth });
+  const fileMetadata = {
+    name: "sample.txt",
+  };
+  const media = {
+    mimeType: "text/plain",
+    body: fs.createReadStream("sample.txt"),
+  };
 
-// Endpoint to get the last report generation date
-app.get("/last-report-date", (req, res) => {
-  const date = getLastReportDate();
-  res.json({ lastReportDate: date });
-});
-
-// Endpoint to generate a new report if 30 days have passed
-app.post("/generate-report", (req, res) => {
-  const now = new Date();
-  const lastDateStr = getLastReportDate();
-
-  if (lastDateStr) {
-    const lastDate = new Date(lastDateStr);
-    const diffDays = (now - lastDate) / (1000 * 60 * 60 * 24);
-    if (diffDays < 30) {
-      return res.status(400).json({
-        error: `Report already generated. Try again in ${Math.ceil(30 - diffDays)} days.`,
-      });
-    }
-  }
-
-  // TODO: Insert Meta API fetch logic here
-
-  saveReportDate();
-  res.json({
-    message: "Report generated successfully",
-    data: {
-      // placeholder: Replace this with real data later
-    },
+  const res = await drive.files.create({
+    resource: fileMetadata,
+    media: media,
+    fields: "id",
   });
+
+  console.log("File ID:", res.data.id);
+}
+
+app.get("/", async (req, res) => {
+  const auth = await authorize();
+  if (!auth) {
+    return res.send("Auth URL logged to console.");
+  }
+
+  try {
+    await uploadFile(auth);
+    res.send("File uploaded to Google Drive");
+  } catch (err) {
+    console.error("Error uploading file:", err);
+    res.status(500).send("Upload failed.");
+  }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+app.listen(port, () => {
+  console.log(`Server running on http://localhost:${port}`);
 });
