@@ -1,5 +1,16 @@
 const API_BASE = ""; // same-origin
 
+// --- ONLY THESE ACCOUNTS WILL SHOW IN THE DROPDOWN ---
+const ALLOW_ACCOUNTS = [
+  "120084692730136",   // Annie Apple
+  "378944901066763",   // zoandcojewellery
+  "1175953690938138",  // CSARA
+  "679554724700799",   // Hidden Muse
+  "1918819531789094",  // Melrose Haus
+  "656509666932258"    // Celeste Collective UK
+];
+// -----------------------------------------------------
+
 const $ = id => document.getElementById(id);
 const fmtInt = v => (v == null ? "-" : Number(v).toLocaleString());
 const fmtMoney = (v, ccy) => (v == null ? "-" : new Intl.NumberFormat(undefined,{style:"currency",currency:ccy||"USD",maximumFractionDigits:2}).format(Number(v)));
@@ -47,9 +58,17 @@ async function loadAdAccounts(){
   sel.innerHTML = '<option value="">Loading…</option>';
   try{
     const j = await fetchJSON(API_BASE + "/debug/ad-accounts");
-    const data = j?.data || [];
+    const all = j?.data || [];
+
+    // filter by allowlist
+    const allowed = all.filter(acc => ALLOW_ACCOUNTS.includes(String(acc.account_id)));
+
+    // keep the allowlist order
+    const order = Object.fromEntries(ALLOW_ACCOUNTS.map((id,i)=>[id,i]));
+    allowed.sort((a,b) => (order[a.account_id] ?? 9999) - (order[b.account_id] ?? 9999));
+
     sel.innerHTML = '<option value="">Select…</option>';
-    data.forEach(acc=>{
+    allowed.forEach(acc=>{
       const id = acc.account_id || acc.id;
       const name = acc.name || ("Account " + id);
       const ccy = acc.currency || "";
@@ -58,6 +77,10 @@ async function loadAdAccounts(){
       opt.textContent = `${name} (${id}) ${ccy ? "• "+ccy : ""}`;
       sel.appendChild(opt);
     });
+
+    if (!allowed.length) {
+      sel.innerHTML = '<option value="">No allowed accounts found</option>';
+    }
   }catch(e){
     if (e instanceof Response) await showAlertFromResponse(e);
     console.error(e);
