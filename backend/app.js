@@ -92,7 +92,7 @@ app.post("/summary/monthly", async (req, res) => {
     const { account, summary, breakdown, since, until } = req.body;
     if (!account || !summary) return res.status(400).json({ error: "Missing data" });
 
-    // lazy-load openai to avoid startup crash if package not yet installed
+    // lazy-load OpenAI so service still boots if package missing
     let OpenAI;
     try {
       ({ default: OpenAI } = await import("openai"));
@@ -104,41 +104,53 @@ app.post("/summary/monthly", async (req, res) => {
     }
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+    // Ask the model to return clean HTML (not Markdown)
     const prompt = `
-You are a marketing consultant. Write a monthly ad performance summary.
+You are a senior marketing consultant. Generate a monthly ad performance report as clean HTML only.
+No code fences, no <html> or <body> wrappers, just semantic HTML inside a single fragment.
 
+Use these sections:
+<h2>Monthly Performance Summary</h2>
+<p>One-paragraph executive overview with spend, revenue, ROAS, CTR, CPC, purchases.</p>
+
+<h3>Key Wins</h3>
+<ul>3–5 concise bullets with specific numbers and impact.</ul>
+
+<h3>Underperformers / Issues</h3>
+<ul>3–5 bullets; call out high-spend low-ROAS items and any fatigue (high frequency).</ul>
+
+<h3>Actionable Recommendations for Next Month</h3>
+<ul>Specific, practical steps: budget shifts, creative tests, audiences, pacing, frequency controls.</ul>
+
+Format numbers human-readably (currency with symbol, 2 decimals, percentages). Do not invent data—use exactly what's provided.
+
+DATA:
 Account: ${account.name} (${account.id})
-Period: ${since} → ${until}
+Period: ${since} to ${until}
 Currency: ${account.currency}
 
-Key KPIs:
-Spend: ${summary.spend}
-Revenue: ${summary.purchase_value}
-ROAS: ${summary.roas}
-CTR: ${summary.ctr}
-CPC: ${summary.cpc}
-Purchases: ${summary.purchases}
+Summary KPIs:
+- Spend: ${summary.spend}
+- Revenue: ${summary.purchase_value}
+- ROAS: ${summary.roas}
+- CTR: ${summary.ctr}
+- CPC: ${summary.cpc}
+- Purchases: ${summary.purchases}
 
-Top campaigns:
-${(breakdown||[]).slice(0,5).map(r =>
-  `${r.name}: Spend ${r.spend}, Purchases ${r.purchases}, ROAS ${r.purchase_roas_api || r.roas}, CTR ${r.ctr}`
+Top campaigns (subset):
+${(breakdown || []).slice(0, 10).map(r =>
+  `- ${r.name}: spend ${r.spend}, purchases ${r.purchases}, ROAS ${r.purchase_roas_api || r.roas}, CTR ${r.ctr}, frequency ${r.frequency}`
 ).join("\n")}
-
-Provide:
-1) Executive summary
-2) Key wins
-3) Underperformers / issues
-4) Actionable recommendations for next month
-Use clear consultant-style language.
     `.trim();
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }],
-      temperature: 0.7
+      temperature: 0.6
     });
 
-    res.json({ text: completion.choices[0].message.content.trim() });
+    const html = completion.choices[0].message.content.trim();
+    res.json({ html });
   } catch (err) {
     console.error("AI summary error:", err);
     res.status(500).json({ error: "AI summary failed" });
