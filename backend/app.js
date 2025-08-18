@@ -1,56 +1,25 @@
-import express from 'express';
-import bodyParser from 'body-parser';
-import cors from 'cors';
-import 'dotenv/config';
-import OpenAI from 'openai';
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import { getAdAccounts } from "./meta.js";
+
+dotenv.config();
 
 const app = express();
-const port = process.env.PORT || 3000;
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
-
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 
-app.post('/analyze', async (req, res) => {
-  const { campaignName, impressions, clicks, cpc, ctr, spend, purchases, roas, addToCart, country, objective, platform } = req.body;
+app.get("/health", (req, res) => res.json({ ok: true }));
 
-  const prompt = `
-You are an expert digital marketing analyst. Analyze the performance of this ${platform} advertising campaign for ${country}. The objective was ${objective}. Use the following metrics:
-
-Campaign Name: ${campaignName}
-Impressions: ${impressions}
-Clicks: ${clicks}
-CPC: ${cpc}
-CTR: ${ctr}
-Spend: ${spend}
-Purchases: ${purchases}
-ROAS: ${roas}
-Add to Carts: ${addToCart}
-
-Give a concise but insightful report. Structure the output like this:
-
-1. Campaign Overview
-2. Performance Summary
-3. Key Insights
-4. Recommendations & Next Steps
-`;
-
+app.get("/debug/ad-accounts", async (req, res) => {
   try {
-    const completion = await openai.chat.completions.create({
-      messages: [{ role: 'user', content: prompt }],
-      model: 'gpt-4'
-    });
-
-    res.json({ result: completion.choices[0].message.content });
-  } catch (error) {
-    console.error('Error generating analysis:', error);
-    res.status(500).json({ error: 'Failed to generate analysis' });
+    const data = await getAdAccounts();
+    res.json(data);
+  } catch (err) {
+    const msg = err?.response?.data || err.message || "Unknown error";
+    res.status(500).json({ error: msg });
   }
 });
 
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => console.log(`Backend running on ${PORT}`));
