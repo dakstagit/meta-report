@@ -7,16 +7,23 @@ const fmtPct = v => (v == null ? "-" : Number(v).toFixed(2) + "%");
 const fmtRoas = v => (v == null ? "-" : Number(v).toFixed(2) + "x");
 const fmtDec2 = v => (v == null ? "-" : Number(v).toFixed(2));
 
-const toCsv = rows => {
-  if (!rows || !rows.length) return "";
-  const headers = Object.keys(rows[0]);
-  const esc = x => {
-    if (x == null) return "";
-    const s = String(x);
-    return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
-  };
-  return [headers.join(","), ...rows.map(r => headers.map(h => esc(r[h])).join(","))].join("\n");
-};
+function showAlertFromResponse(res) {
+  return res.text().then(t => {
+    try {
+      const j = JSON.parse(t);
+      const msg = j?.error?.error?.message || j?.error?.message || j?.message || t;
+      alert("Failed: " + msg);
+    } catch {
+      alert("Failed: " + t);
+    }
+  });
+}
+
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw r; // throw Response to let caller parse body
+  return r.json();
+}
 
 function monthDefault() {
   const d = new Date();
@@ -39,8 +46,7 @@ async function loadAdAccounts(){
   const sel = $("account");
   sel.innerHTML = '<option value="">Loading…</option>';
   try{
-    const r = await fetch(API_BASE + "/debug/ad-accounts");
-    const j = await r.json();
+    const j = await fetchJSON(API_BASE + "/debug/ad-accounts");
     const data = j?.data || [];
     sel.innerHTML = '<option value="">Select…</option>';
     data.forEach(acc=>{
@@ -53,6 +59,7 @@ async function loadAdAccounts(){
       sel.appendChild(opt);
     });
   }catch(e){
+    if (e instanceof Response) await showAlertFromResponse(e);
     console.error(e);
     sel.innerHTML = '<option value="">Failed to load</option>';
   }
@@ -61,9 +68,7 @@ async function loadAdAccounts(){
 async function fetchView(name="Revenue Results"){
   const u = new URL((API_BASE||"") + "/config/view", window.location.origin);
   u.searchParams.set("name", name);
-  const r = await fetch(u.toString());
-  if (!r.ok) throw new Error("view HTTP " + r.status);
-  return r.json(); // { name, columns: [{key,label,fmt}] }
+  return fetchJSON(u.toString());
 }
 
 function resolveFormatter(fmt, currency){
@@ -116,7 +121,7 @@ function renderBreakdown(container, rows, currency, level, view){
       <div style="font-weight:700">Breakdown by ${level}</div>
       <div class="actions">
         <button class="secondary" id="sortSpend">Sort by Spend</button>
-        <button class="secondary" id="sortROAS">Sort by ROAS</button>
+        <button class="secondary" id="sortROAS">Sort by Purchase ROAS</button>
       </div>
     </div>
     <div class="table-wrap">
@@ -144,25 +149,13 @@ function renderRows(rows, cols){
   `).join("");
 }
 
-function downloadCsv(filename, rows, summary){
-  const summaryRows = Object.entries(summary).map(([k,v])=>({metric:k,value:v}));
-  const block1 = "Summary\n" + toCsv(summaryRows);
-  const block2 = "\n\nBreakdown\n" + toCsv(rows);
-  const blob = new Blob([block1+block2], { type:"text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
 async function getReport(accountId, month, level){
   const u = new URL((API_BASE || "") + "/reports/monthly", window.location.origin);
   u.searchParams.set("account_id", accountId);
   if (month) u.searchParams.set("month", month);
   if (level) u.searchParams.set("level", level);
   const r = await fetch(u.toString());
-  if (!r.ok) throw new Error("HTTP " + r.status);
+  if (!r.ok) throw r; // throw Response so we can read the server error body
   return r.json();
 }
 
@@ -178,8 +171,31 @@ function renderReport(json, view){
 
   $("downloadCsvBtn").disabled = !json.breakdown?.length;
   $("downloadCsvBtn").onclick = () => {
-    const fname = `meta_report_${json.account?.id || "account"}_${json.since}_${json.until}_${json.level}.csv`;
-    downloadCsv(fname, json.breakdown || [], json.summary || {});
+    const headers = view.columns.map(c => c.key);
+    const rows = (json.breakdown || []).map(r => {
+      const o = {};
+      headers.forEach(h => { o[h] = r[h]; });
+      return o;
+    });
+    const summaryRows = Object.entries(json.summary || {}).map(([k,v])=>({metric:k,value:v}));
+    const toCsv = (rowsArr) => {
+      if (!rowsArr.length) return "";
+      const hs = Object.keys(rowsArr[0]);
+      const esc = x => {
+        if (x == null) return "";
+        const s = String(x);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+      };
+      return [hs.join(","), ...rowsArr.map(r => hs.map(h => esc(r[h])).join(","))].join("\n");
+    };
+    const blob = new Blob([
+      "Summary\n" + toCsv(summaryRows) + "\n\nBreakdown\n" + toCsv(rows)
+    ], { type:"text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `meta_report_${json.account?.id || "account"}_${json.since}_${json.until}_${json.level}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 }
 
@@ -199,7 +215,8 @@ $("loadBtn").onclick = async () => {
     const json = await getReport(accountId, month, level);
     renderReport(json, view);
   }catch(e){
-    alert("Failed: " + (e?.message || e));
+    if (e instanceof Response) await showAlertFromResponse(e);
+    else alert("Failed: " + (e?.message || e));
     console.error(e);
   }finally{
     $("loadBtn").disabled = false;
