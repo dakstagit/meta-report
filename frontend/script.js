@@ -1,10 +1,11 @@
-// same-origin base
-const API_BASE = ""; // empty means same origin
+const API_BASE = ""; // same-origin
 
 const $ = id => document.getElementById(id);
 const fmtInt = v => (v == null ? "-" : Number(v).toLocaleString());
 const fmtMoney = (v, ccy) => (v == null ? "-" : new Intl.NumberFormat(undefined,{style:"currency",currency:ccy||"USD",maximumFractionDigits:2}).format(Number(v)));
 const fmtPct = v => (v == null ? "-" : Number(v).toFixed(2) + "%");
+const fmtRoas = v => (v == null ? "-" : Number(v).toFixed(2) + "x");
+const fmtDec2 = v => (v == null ? "-" : Number(v).toFixed(2));
 
 const toCsv = rows => {
   if (!rows || !rows.length) return "";
@@ -57,6 +58,23 @@ async function loadAdAccounts(){
   }
 }
 
+async function fetchView(name="Revenue Results"){
+  const u = new URL((API_BASE||"") + "/config/view", window.location.origin);
+  u.searchParams.set("name", name);
+  const r = await fetch(u.toString());
+  if (!r.ok) throw new Error("view HTTP " + r.status);
+  return r.json(); // { name, columns: [{key,label,fmt}] }
+}
+
+function resolveFormatter(fmt, currency){
+  if (fmt === "money") return v => v==null?"-":fmtMoney(v, currency);
+  if (fmt === "int")   return v => fmtInt(v);
+  if (fmt === "pct")   return v => fmtPct(v);
+  if (fmt === "roas")  return v => fmtRoas(v);
+  if (fmt === "dec2")  return v => fmtDec2(v);
+  return v => v ?? "-";
+}
+
 function renderSummary(container, account, since, until, s){
   container.innerHTML = `
     <div class="card">
@@ -71,32 +89,26 @@ function renderSummary(container, account, since, until, s){
         <div class="kpi"><div class="k">Impressions</div><div class="v">${fmtInt(s.impressions)}</div></div>
         <div class="kpi"><div class="k">Clicks</div><div class="v">${fmtInt(s.clicks)}</div></div>
         <div class="kpi"><div class="k">CTR</div><div class="v">${fmtPct(s.ctr)}</div></div>
-        <div class="kpi"><div class="k">CPC</div><div class="v">${s.cpc==null?"-":fmtMoney(s.cpc, account?.currency)}</div></div>
-        <div class="kpi"><div class="k">CPM</div><div class="v">${s.cpm==null?"-":fmtMoney(s.cpm, account?.currency)}</div></div>
         <div class="kpi"><div class="k">Purchases</div><div class="v">${fmtInt(s.purchases)}</div></div>
         <div class="kpi"><div class="k">Revenue</div><div class="v">${fmtMoney(s.purchase_value, account?.currency)}</div></div>
         <div class="kpi"><div class="k">CPA</div><div class="v">${s.cpa==null?"-":fmtMoney(s.cpa, account?.currency)}</div></div>
-        <div class="kpi"><div class="k">ROAS</div><div class="v">${s.roas==null?"-":Number(s.roas).toFixed(2)}x</div></div>
+        <div class="kpi"><div class="k">ROAS</div><div class="v">${s.roas==null?"-":fmtRoas(s.roas)}</div></div>
       </div>
     </div>
   `;
 }
 
-function renderBreakdown(container, rows, currency, level){
-  const cols = [
-    { key:"name", label: level[0].toUpperCase()+level.slice(1) },
-    { key:"spend", label:"Spend", fmt:v=>fmtMoney(v,currency) },
-    { key:"impressions", label:"Impr.", fmt:fmtInt },
-    { key:"reach", label:"Reach", fmt:fmtInt },
-    { key:"clicks", label:"Clicks", fmt:fmtInt },
-    { key:"ctr", label:"CTR", fmt:fmtPct },
-    { key:"cpc", label:"CPC", fmt:v=>v==null?"-":fmtMoney(v,currency) },
-    { key:"cpm", label:"CPM", fmt:v=>v==null?"-":fmtMoney(v,currency) },
-    { key:"purchases", label:"Purch.", fmt:fmtInt },
-    { key:"purchase_value", label:"Revenue", fmt:v=>fmtMoney(v,currency) },
-    { key:"cpa", label:"CPA", fmt:v=>v==null?"-":fmtMoney(v,currency) },
-    { key:"roas", label:"ROAS", fmt:v=>v==null?"-":Number(v).toFixed(2)+"x" }
-  ];
+function renderBreakdown(container, rows, currency, level, view){
+  const cols = (view?.columns || []).map(c => {
+    const copy = { ...c };
+    if (copy.key === "name") {
+      const auto = level[0].toUpperCase()+level.slice(1);
+      if (!copy.label || copy.label.toLowerCase() === "campaign") copy.label = auto;
+    }
+    copy.fmtFn = resolveFormatter(copy.fmt, currency);
+    return copy;
+  });
+
   const card = document.createElement("div");
   card.className = "card";
   card.innerHTML = `
@@ -121,14 +133,14 @@ function renderBreakdown(container, rows, currency, level){
     tbody.innerHTML = renderRows(rows, cols);
   };
   card.querySelector("#sortROAS").onclick = () => {
-    rows.sort((a,b)=>(b.roas||0)-(a.roas||0));
+    rows.sort((a,b)=>(b.purchase_roas_api||b.roas||0)-(a.purchase_roas_api||a.roas||0));
     tbody.innerHTML = renderRows(rows, cols);
   };
 }
 
 function renderRows(rows, cols){
   return rows.map(r=>`
-    <tr>${cols.map(c=>`<td>${c.fmt?c.fmt(r[c.key]):(r[c.key]??"-")}</td>`).join("")}</tr>
+    <tr>${cols.map(c=>`<td>${c.fmtFn ? c.fmtFn(r[c.key]) : (r[c.key] ?? "-")}</td>`).join("")}</tr>
   `).join("");
 }
 
@@ -154,7 +166,7 @@ async function getReport(accountId, month, level){
   return r.json();
 }
 
-function renderReport(json){
+function renderReport(json, view){
   const result = $("result");
   result.innerHTML = "";
 
@@ -162,7 +174,7 @@ function renderReport(json){
   renderSummary(summaryWrap, json.account, json.since, json.until, json.summary);
   result.appendChild(summaryWrap.firstElementChild);
 
-  renderBreakdown(result, json.breakdown || [], json.account?.currency, json.level);
+  renderBreakdown(result, json.breakdown || [], json.account?.currency, json.level, view);
 
   $("downloadCsvBtn").disabled = !json.breakdown?.length;
   $("downloadCsvBtn").onclick = () => {
@@ -177,14 +189,15 @@ $("month").value = monthDefault();
 $("loadBtn").onclick = async () => {
   const accountId = $("account").value.trim();
   if (!accountId) { alert("Select an ad account"); return; }
-  const month = $("month").value.trim(); // optional -> last month if empty
+  const month = $("month").value.trim();
   const level = $("level").value;
 
   $("loadBtn").disabled = true;
   $("loadBtn").textContent = "Loading…";
   try{
+    const view = await fetchView("Revenue Results");
     const json = await getReport(accountId, month, level);
-    renderReport(json);
+    renderReport(json, view);
   }catch(e){
     alert("Failed: " + (e?.message || e));
     console.error(e);
