@@ -1,26 +1,19 @@
-import fetch from "node-fetch";
+import axios from "axios";
 
-/**
- * Fetches insights from Meta Ads API.
- * @param {string} accessToken - The Meta API token (from env var)
- * @param {string} adAccountId - The ad account ID (e.g. 123456789)
- * @returns {Promise<Object>} - The JSON response from Meta
- */
-export async function fetchMetaReportData(accessToken, adAccountId) {
-  const url = `https://graph.facebook.com/v19.0/act_${adAccountId}/insights?fields=campaign_name,spend,impressions,clicks,actions,cost_per_action_type&time_range[since]=30days_ago&time_range[until]=today`;
+const BASE = "https://graph.facebook.com/v19.0";
+const TOKEN = process.env.META_TOKEN;
 
-  const res = await fetch(url, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
+if (!TOKEN) {
+  console.warn("META_TOKEN not set. Add it to /backend/.env for local dev.");
+}
 
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Meta API Error: ${res.status} - ${errText}`);
-  }
-
-  const data = await res.json();
+export async function getAdAccounts() {
+  const url = `${BASE}/me/adaccounts`;
+  const params = {
+    access_token: TOKEN,
+    limit: 50,
+    fields: "name,account_id,currency"
+  };
+  const { data } = await axios.get(url, { params });
   return data;
 }
