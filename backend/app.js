@@ -10,10 +10,7 @@ import {
   getMonthlyReport
 } from "./meta.js";
 
-import OpenAI from "openai";   // NEW
-
 dotenv.config();
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY }); // NEW
 
 const app = express();
 app.use(cors());
@@ -89,13 +86,23 @@ app.get("/config/view", (req, res) => {
   res.json({ name, columns: Array.isArray(view?.columns) ? view.columns : [] });
 });
 
-// NEW: AI summary endpoint
+/* ---------------- NEW: AI summary endpoint (lazy import) ---------------- */
 app.post("/summary/monthly", async (req, res) => {
   try {
     const { account, summary, breakdown, since, until } = req.body;
-    if (!account || !summary) {
-      return res.status(400).json({ error: "Missing data" });
+    if (!account || !summary) return res.status(400).json({ error: "Missing data" });
+
+    // lazy-load openai to avoid startup crash if package not yet installed
+    let OpenAI;
+    try {
+      ({ default: OpenAI } = await import("openai"));
+    } catch {
+      return res.status(500).json({ error: "OpenAI SDK not installed. Add \"openai\" to backend/package.json dependencies." });
     }
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(500).json({ error: "OPENAI_API_KEY not set in environment." });
+    }
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
     const prompt = `
 You are a marketing consultant. Write a monthly ad performance summary.
@@ -117,18 +124,18 @@ ${(breakdown||[]).slice(0,5).map(r =>
   `${r.name}: Spend ${r.spend}, Purchases ${r.purchases}, ROAS ${r.purchase_roas_api || r.roas}, CTR ${r.ctr}`
 ).join("\n")}
 
-Please provide:
-1. Executive summary
-2. Key wins
-3. Underperformers / issues
-4. Actionable recommendations for next month
+Provide:
+1) Executive summary
+2) Key wins
+3) Underperformers / issues
+4) Actionable recommendations for next month
 Use clear consultant-style language.
-    `;
+    `.trim();
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }],
-      temperature: 0.7,
+      temperature: 0.7
     });
 
     res.json({ text: completion.choices[0].message.content.trim() });
