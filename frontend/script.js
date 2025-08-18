@@ -1,6 +1,6 @@
 const API_BASE = ""; // same-origin
 
-// --- ONLY THESE ACCOUNTS WILL SHOW IN THE DROPDOWN ---
+// --- dropdown allowlist (your chosen six) ---
 const ALLOW_ACCOUNTS = [
   "120084692730136",   // Annie Apple
   "378944901066763",   // zoandcojewellery
@@ -9,7 +9,6 @@ const ALLOW_ACCOUNTS = [
   "1918819531789094",  // Melrose Haus
   "656509666932258"    // Celeste Collective UK
 ];
-// -----------------------------------------------------
 
 const $ = id => document.getElementById(id);
 const fmtInt = v => (v == null ? "-" : Number(v).toLocaleString());
@@ -32,7 +31,7 @@ function showAlertFromResponse(res) {
 
 async function fetchJSON(url) {
   const r = await fetch(url);
-  if (!r.ok) throw r; // throw Response to let caller parse body
+  if (!r.ok) throw r;
   return r.json();
 }
 
@@ -58,11 +57,15 @@ async function loadAdAccounts(){
   sel.innerHTML = '<option value="">Loading…</option>';
   try{
     const j = await fetchJSON(API_BASE + "/debug/ad-accounts");
-    const data = j?.data || [];
+    const all = j?.data || [];
+
+    const allowed = all.filter(acc => ALLOW_ACCOUNTS.includes(String(acc.account_id)));
+    const order = Object.fromEntries(ALLOW_ACCOUNTS.map((id,i)=>[id,i]));
+    allowed.sort((a,b) => (order[a.account_id] ?? 9999) - (order[b.account_id] ?? 9999));
+
     sel.innerHTML = '<option value="">Select…</option>';
-    data.forEach(acc=>{
+    allowed.forEach(acc=>{
       const id = acc.account_id || acc.id;
-      if (ALLOW_ACCOUNTS.length && !ALLOW_ACCOUNTS.includes(id)) return; // filter
       const name = acc.name || ("Account " + id);
       const ccy = acc.currency || "";
       const opt = document.createElement("option");
@@ -70,6 +73,8 @@ async function loadAdAccounts(){
       opt.textContent = `${name} (${id}) ${ccy ? "• "+ccy : ""}`;
       sel.appendChild(opt);
     });
+
+    if (!allowed.length) sel.innerHTML = '<option value="">No allowed accounts found</option>';
   }catch(e){
     if (e instanceof Response) await showAlertFromResponse(e);
     console.error(e);
@@ -171,7 +176,7 @@ async function getReport(accountId, month, level){
   return r.json();
 }
 
-// ---- AI Summary ----
+// ---- AI Summary helpers ----
 async function makeAISummary(json) {
   const resp = await fetch(API_BASE + "/summary/monthly", {
     method: "POST",
@@ -180,7 +185,27 @@ async function makeAISummary(json) {
   });
   if (!resp.ok) throw resp;
   const j = await resp.json();
-  return j.text;
+  return j.html; // backend returns HTML now
+}
+
+// very light sanitization: allow only a safe subset of tags/attrs
+function safeHTML(html) {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const allowedTags = new Set(["H1","H2","H3","H4","H5","H6","P","UL","OL","LI","STRONG","EM","B","I","BR","SPAN","SMALL","DIV"]);
+  const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_ELEMENT, null);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (!allowedTags.has(node.tagName)) {
+      const replacement = document.createElement("div");
+      replacement.innerHTML = node.innerHTML;
+      node.replaceWith(...replacement.childNodes);
+      continue;
+    }
+    // strip all attributes
+    [...node.attributes].forEach(attr => node.removeAttribute(attr.name));
+  }
+  return template.innerHTML;
 }
 
 function renderReport(json, view){
@@ -193,6 +218,7 @@ function renderReport(json, view){
 
   renderBreakdown(result, json.breakdown || [], json.account?.currency, json.level, view);
 
+  // CSV button
   $("downloadCsvBtn").disabled = !json.breakdown?.length;
   $("downloadCsvBtn").onclick = () => {
     const headers = view.columns.map(c => c.key);
@@ -222,13 +248,13 @@ function renderReport(json, view){
     URL.revokeObjectURL(url);
   };
 
-  // AI Summary card
+  // AI Summary card – renders HTML nicely
   const aiCard = document.createElement("div");
   aiCard.className = "card";
   aiCard.innerHTML = `
     <div style="font-weight:700;margin-bottom:10px">AI-Powered Monthly Summary</div>
     <button id="makeAISummaryBtn">Make Month Summary</button>
-    <pre id="aiSummaryOut" style="white-space:pre-wrap;margin-top:10px"></pre>
+    <div id="aiSummaryOut" style="margin-top:12px; line-height:1.5"></div>
   `;
   result.appendChild(aiCard);
 
@@ -239,8 +265,8 @@ function renderReport(json, view){
     btn.disabled = true;
     btn.textContent = "Thinking…";
     try {
-      const text = await makeAISummary(json);
-      out.textContent = text;
+      const html = await makeAISummary(json);
+      out.innerHTML = safeHTML(html);
     } catch(e) {
       if (e instanceof Response) await showAlertFromResponse(e);
       else alert("AI summary failed");
