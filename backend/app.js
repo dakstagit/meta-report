@@ -1,6 +1,8 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 import {
   getAdAccounts,
   getMonthlyInsights,
@@ -13,29 +15,25 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Health route for Render health checks
+// serve the frontend (../frontend) from the SAME service.
+// no separate static site, no backend URL typing.
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const FRONTEND_DIR = path.resolve(__dirname, "../frontend");
+app.use(express.static(FRONTEND_DIR));
+
+// API
 app.get("/health", (req, res) => res.json({ ok: true }));
 
-// Root hint
-app.get("/", (req, res) => {
-  res.json({
-    ok: true,
-    hint: "Use /health, /debug/ad-accounts, /insights/monthly, or /reports/monthly"
-  });
-});
-
-// Debug: verify your Meta token + permissions
 app.get("/debug/ad-accounts", async (req, res) => {
   try {
     const data = await getAdAccounts();
     res.json(data);
   } catch (err) {
-    const msg = err?.response?.data || err.message || "Unknown error";
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: err?.response?.data || err.message || "Unknown error" });
   }
 });
 
-// Raw monthly insights (Meta response normalized row-by-row)
 app.get("/insights/monthly", async (req, res) => {
   try {
     const { account_id, month, level } = req.query;
@@ -46,18 +44,10 @@ app.get("/insights/monthly", async (req, res) => {
     });
     res.json(result);
   } catch (err) {
-    const msg = err?.response?.data || err.message || "Unknown error";
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: err?.response?.data || err.message || "Unknown error" });
   }
 });
 
-// Aggregated monthly report: summary KPIs + breakdown
-// Example:
-//   /reports/monthly?account_id=1234567890
-// Optional:
-//   &month=2025-07
-//   &level=campaign  (or adset, ad; default campaign)
-//   &top=20          (limit breakdown rows by spend desc; default 1000 = effectively all)
 app.get("/reports/monthly", async (req, res) => {
   try {
     const { account_id, month, level, top } = req.query;
@@ -69,10 +59,14 @@ app.get("/reports/monthly", async (req, res) => {
     });
     res.json(result);
   } catch (err) {
-    const msg = err?.response?.data || err.message || "Unknown error";
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: err?.response?.data || err.message || "Unknown error" });
   }
 });
 
+// fallback to index.html for root
+app.get("/", (req, res) => {
+  res.sendFile(path.join(FRONTEND_DIR, "index.html"));
+});
+
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log(`Backend running on ${PORT}`));
+app.listen(PORT, () => console.log(`Service on ${PORT}`));
