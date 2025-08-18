@@ -1,7 +1,7 @@
 import axios from "axios";
 import dayjs from "dayjs";
 
-// Align with your live payload (your adaccounts "next" link shows v23.0)
+// Use the version your account list showed
 const BASE = "https://graph.facebook.com/v23.0";
 const TOKEN = process.env.META_TOKEN;
 
@@ -66,7 +66,7 @@ export async function getMonthlyInsights({ accountId, ym, level = "account" }) {
       "ad_id","ad_name",
       "spend","impressions","clicks","cpc","cpm","ctr","reach",
       "frequency",
-      "link_clicks",
+      "inline_link_clicks",           // <-- valid field
       "actions","action_values",
       "purchase_roas"
     ].join(",")
@@ -93,6 +93,9 @@ export async function getMonthlyInsights({ accountId, ym, level = "account" }) {
     const initiate_checkout = pickAny(r.actions, [
       "offsite_conversion.initiate_checkout", "initiate_checkout"
     ]);
+
+    // Link clicks: prefer inline_link_clicks field, fall back to actions["link_click"]
+    const link_clicks = n(r.inline_link_clicks) || pickAny(r.actions, ["link_click"]);
 
     // purchase_roas array → take first numeric value if present
     let purchase_roas_api = null;
@@ -122,7 +125,7 @@ export async function getMonthlyInsights({ accountId, ym, level = "account" }) {
       reach: r.reach != null ? n(r.reach) : null,
 
       frequency: r.frequency != null ? Number(r.frequency) : null,
-      link_clicks: n(r.link_clicks),
+      link_clicks,
 
       landing_page_views,
       add_to_cart,
@@ -171,8 +174,7 @@ async function fetchBudgets(level, ids = []) {
       const { data } = await axios.get(url, { params });
       const raw = n(data?.daily_budget) || n(data?.lifetime_budget) || 0;
       results[id] = raw > 0 ? raw / 100 : null; // convert from minor units
-    } catch (e) {
-      // swallow per-object errors; keep the rest
+    } catch {
       results[id] = null;
     }
   }));
