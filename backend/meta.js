@@ -1,7 +1,8 @@
 import axios from "axios";
 import dayjs from "dayjs";
 
-const BASE = "https://graph.facebook.com/v19.0";
+// Align with your live payload (your adaccounts "next" link shows v23.0)
+const BASE = "https://graph.facebook.com/v23.0";
 const TOKEN = process.env.META_TOKEN;
 
 if (!TOKEN) {
@@ -15,15 +16,18 @@ function monthRange(ym) {
   const until = target.endOf("month").format("YYYY-MM-DD");
   return { since, until };
 }
-const n = v => Number.isFinite(Number(v)) ? Number(v) : 0;
+const n = v => {
+  const x = Number(v);
+  return Number.isFinite(x) ? x : 0;
+};
 const safeDiv = (a,b) => (n(b) > 0 ? n(a)/n(b) : null);
 const pct = (a,b) => {
   const r = safeDiv(a,b);
   return r === null ? null : r*100;
 };
 const pickActions = (actions = [], type) => {
-  const hit = actions.find(a => a.action_type === type);
-  return hit ? Number(hit.value || 0) : 0;
+  const hit = Array.isArray(actions) ? actions.find(a => a?.action_type === type) : null;
+  return hit ? n(hit.value) : 0;
 };
 const pickAny = (actions = [], types = []) =>
   types.reduce((sum, t) => sum + pickActions(actions, t), 0);
@@ -67,18 +71,30 @@ export async function getMonthlyInsights({ accountId, ym, level = "account" }) {
       "purchase_roas"
     ].join(",")
   };
+
   const { data } = await axios.get(url, { params });
 
   const rows = (data?.data || []).map(r => {
-    const purchases = pickActions(r.actions, "offsite_conversion.purchase") || pickActions(r.actions, "purchase");
-    const purchase_value = pickActions(r.action_values, "offsite_conversion.purchase") || pickActions(r.action_values, "purchase");
+    // core conversions
+    const purchases = pickAny(r.actions, [
+      "offsite_conversion.purchase", "purchase"
+    ]);
+    const purchase_value = pickAny(r.action_values, [
+      "offsite_conversion.purchase", "purchase"
+    ]);
 
-    // additional actions requested for the custom view
-    const landing_page_views = pickAny(r.actions, ["landing_page_view", "offsite_conversion.landing_page_view"]);
-    const add_to_cart        = pickAny(r.actions, ["offsite_conversion.add_to_cart", "add_to_cart"]);
-    const initiate_checkout  = pickAny(r.actions, ["offsite_conversion.initiate_checkout", "initiate_checkout"]);
+    // extras for your “Revenue Results” view
+    const landing_page_views = pickAny(r.actions, [
+      "landing_page_view", "offsite_conversion.landing_page_view"
+    ]);
+    const add_to_cart = pickAny(r.actions, [
+      "offsite_conversion.add_to_cart", "add_to_cart"
+    ]);
+    const initiate_checkout = pickAny(r.actions, [
+      "offsite_conversion.initiate_checkout", "initiate_checkout"
+    ]);
 
-    // "purchase_roas" from API is an array; take first value if present
+    // purchase_roas array → take first numeric value if present
     let purchase_roas_api = null;
     if (Array.isArray(r.purchase_roas) && r.purchase_roas.length > 0) {
       const v = Number(r.purchase_roas[0]?.value);
@@ -143,24 +159,24 @@ function deriveKpis({ spend, impressions, clicks, purchases, purchase_value }) {
   return { ctr, cpc, cpm, cpa, roas };
 }
 
-// fetch budgets for campaigns/adsets (values are in smallest unit; divide by 100)
+// budgets for campaign/adset (return map id -> amount in currency units)
 async function fetchBudgets(level, ids = []) {
   if (!ids.length) return {};
   const fieldList = "name,daily_budget,lifetime_budget";
   const results = {};
-  // simple concurrent fetches (ok for modest list sizes)
   await Promise.all(ids.map(async (id) => {
-    const url = `${BASE}/${id}`;
-    const params = { access_token: TOKEN, fields: fieldList };
     try {
+      const url = `${BASE}/${id}`;
+      const params = { access_token: TOKEN, fields: fieldList };
       const { data } = await axios.get(url, { params });
-      const raw = n(data.daily_budget) || n(data.lifetime_budget) || 0;
-      results[id] = raw > 0 ? raw / 100 : null; // convert to currency units
-    } catch {
+      const raw = n(data?.daily_budget) || n(data?.lifetime_budget) || 0;
+      results[id] = raw > 0 ? raw / 100 : null; // convert from minor units
+    } catch (e) {
+      // swallow per-object errors; keep the rest
       results[id] = null;
     }
   }));
-  return results; // map: id -> budget
+  return results;
 }
 
 export async function getMonthlyReport({ accountId, ym, level = "campaign", top = 1000 }) {
@@ -185,7 +201,7 @@ export async function getMonthlyReport({ accountId, ym, level = "campaign", top 
   });
 
   const summary = { ...totals, ...deriveKpis(totals) };
-  summary.frequency = safeDiv(summary.impressions, summary.reach); // summary frequency
+  summary.frequency = safeDiv(summary.impressions, summary.reach); // fallback
 
   // group breakdown
   const map = new Map();
@@ -222,16 +238,13 @@ export async function getMonthlyReport({ accountId, ym, level = "campaign", top 
 
   let breakdown = Array.from(map.values()).map(g => {
     const kpis = { ...g, ...deriveKpis(g) };
-    // frequency derived at group level
     kpis.frequency = safeDiv(kpis.impressions, kpis.reach);
-    // purchase_roas from API (average of values if multiple)
     if (g.purchase_roas_api_vals.length) {
       const sum = g.purchase_roas_api_vals.reduce((a,b)=>a+b,0);
       kpis.purchase_roas_api = sum / g.purchase_roas_api_vals.length;
     } else {
       kpis.purchase_roas_api = safeDiv(kpis.purchase_value, kpis.spend);
     }
-    // budget if retrieved
     kpis.budget = budgets[g.id] ?? null;
     delete kpis.purchase_roas_api_vals;
     return kpis;
