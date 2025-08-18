@@ -58,18 +58,11 @@ async function loadAdAccounts(){
   sel.innerHTML = '<option value="">Loading…</option>';
   try{
     const j = await fetchJSON(API_BASE + "/debug/ad-accounts");
-    const all = j?.data || [];
-
-    // filter by allowlist
-    const allowed = all.filter(acc => ALLOW_ACCOUNTS.includes(String(acc.account_id)));
-
-    // keep the allowlist order
-    const order = Object.fromEntries(ALLOW_ACCOUNTS.map((id,i)=>[id,i]));
-    allowed.sort((a,b) => (order[a.account_id] ?? 9999) - (order[b.account_id] ?? 9999));
-
+    const data = j?.data || [];
     sel.innerHTML = '<option value="">Select…</option>';
-    allowed.forEach(acc=>{
+    data.forEach(acc=>{
       const id = acc.account_id || acc.id;
+      if (ALLOW_ACCOUNTS.length && !ALLOW_ACCOUNTS.includes(id)) return; // filter
       const name = acc.name || ("Account " + id);
       const ccy = acc.currency || "";
       const opt = document.createElement("option");
@@ -77,10 +70,6 @@ async function loadAdAccounts(){
       opt.textContent = `${name} (${id}) ${ccy ? "• "+ccy : ""}`;
       sel.appendChild(opt);
     });
-
-    if (!allowed.length) {
-      sel.innerHTML = '<option value="">No allowed accounts found</option>';
-    }
   }catch(e){
     if (e instanceof Response) await showAlertFromResponse(e);
     console.error(e);
@@ -178,8 +167,20 @@ async function getReport(accountId, month, level){
   if (month) u.searchParams.set("month", month);
   if (level) u.searchParams.set("level", level);
   const r = await fetch(u.toString());
-  if (!r.ok) throw r; // throw Response so we can read the server error body
+  if (!r.ok) throw r;
   return r.json();
+}
+
+// ---- AI Summary ----
+async function makeAISummary(json) {
+  const resp = await fetch(API_BASE + "/summary/monthly", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(json)
+  });
+  if (!resp.ok) throw resp;
+  const j = await resp.json();
+  return j.text;
 }
 
 function renderReport(json, view){
@@ -219,6 +220,35 @@ function renderReport(json, view){
     a.href = url; a.download = `meta_report_${json.account?.id || "account"}_${json.since}_${json.until}_${json.level}.csv`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  // AI Summary card
+  const aiCard = document.createElement("div");
+  aiCard.className = "card";
+  aiCard.innerHTML = `
+    <div style="font-weight:700;margin-bottom:10px">AI-Powered Monthly Summary</div>
+    <button id="makeAISummaryBtn">Make Month Summary</button>
+    <pre id="aiSummaryOut" style="white-space:pre-wrap;margin-top:10px"></pre>
+  `;
+  result.appendChild(aiCard);
+
+  const btn = aiCard.querySelector("#makeAISummaryBtn");
+  const out = aiCard.querySelector("#aiSummaryOut");
+
+  btn.onclick = async () => {
+    btn.disabled = true;
+    btn.textContent = "Thinking…";
+    try {
+      const text = await makeAISummary(json);
+      out.textContent = text;
+    } catch(e) {
+      if (e instanceof Response) await showAlertFromResponse(e);
+      else alert("AI summary failed");
+      console.error(e);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Make Month Summary";
+    }
   };
 }
 
