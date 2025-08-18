@@ -1,10 +1,382 @@
-<!DOCTYPE html>
-<html>
-<head><title>Meta Report</title></head>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Meta Monthly Reports</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #0b0f12;
+      --card: #12181d;
+      --muted: #8aa0b2;
+      --text: #e7eef5;
+      --accent: #4ea1ff;
+      --ok: #30c48d;
+      --warn: #ffcc00;
+      --err: #ff6b6b;
+      --border: #1f2a33;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
+      background: var(--bg); color: var(--text);
+    }
+    .wrap {
+      max-width: 1100px; margin: 24px auto; padding: 0 16px;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      margin-bottom: 16px;
+    }
+    .title { font-size: 22px; font-weight: 700; letter-spacing: 0.3px; }
+    .hint { color: var(--muted); font-size: 13px; }
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 14px; padding: 16px; box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset;
+    }
+    .grid { display: grid; gap: 12px; }
+    @media (min-width: 780px) {
+      .grid-2 { grid-template-columns: 1fr 1fr; }
+      .grid-3 { grid-template-columns: repeat(3, 1fr); }
+    }
+    label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    select, input[type="month"] {
+      width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
+      background: #0e141a; color: var(--text); outline: none;
+    }
+    button {
+      padding: 12px 16px; border-radius: 10px; border: 1px solid transparent;
+      background: var(--accent); color: #001729; font-weight: 700; letter-spacing: .2px;
+      cursor: pointer;
+    }
+    button.secondary { background: transparent; color: var(--text); border-color: var(--border); }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+
+    .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .kpis { display: grid; gap: 10px; margin-top: 12px; }
+    @media (min-width: 780px) { .kpis { grid-template-columns: repeat(6, 1fr); } }
+    .kpi {
+      background: #0e141a; border: 1px solid var(--border); border-radius: 12px; padding: 10px;
+    }
+    .kpi .k { font-size: 12px; color: var(--muted); }
+    .kpi .v { font-size: 18px; font-weight: 700; margin-top: 4px; }
+
+    .table-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 12px; margin-top: 14px; }
+    table { width: 100%; border-collapse: collapse; min-width: 900px; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: right; font-variant-numeric: tabular-nums; }
+    th:first-child, td:first-child { text-align: left; }
+    thead th { position: sticky; top: 0; background: #0f141a; z-index: 1; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+    .status { font-size: 13px; }
+    .ok { color: var(--ok); }
+    .err { color: var(--err); }
+
+    .bar {
+      height: 6px; background: #0e141a; border-radius: 999px; overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .bar > i { display: block; height: 100%; background: var(--accent); width: 0%; }
+
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    footer { margin: 20px 0 40px; color: var(--muted); font-size: 12px; text-align: center;}
+    .link { color: var(--accent); text-decoration: none; }
+  </style>
+</head>
 <body>
-  <h1>Meta Ads Report</h1>
-  <button id="generate">Generate Report</button>
-  <pre id="output"></pre>
-  <script src="script.js"></script>
+  <div class="wrap">
+    <header>
+      <div>
+        <div class="title">Meta Reports — Frontend</div>
+        <div class="hint">Pick an ad account, a month, and a level. We’ll hit your backend and show results.</div>
+      </div>
+      <div class="status" id="healthStatus">checking backend…</div>
+    </header>
+
+    <div class="card grid grid-3" id="controls">
+      <div>
+        <label for="apiBase">Backend URL</label>
+        <input id="apiBase" placeholder="https://your-backend.onrender.com" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#0e141a;color:var(--text);" />
+      </div>
+      <div>
+        <label for="account">Ad Account</label>
+        <select id="account"><option value="">Loading…</option></select>
+      </div>
+      <div>
+        <label for="month">Month (YYYY-MM)</label>
+        <input id="month" type="month" />
+      </div>
+      <div>
+        <label for="level">Level</label>
+        <select id="level">
+          <option value="campaign">Campaign</option>
+          <option value="adset">Ad Set</option>
+          <option value="ad">Ad</option>
+          <option value="account">Account</option>
+        </select>
+      </div>
+      <div class="row" style="align-self:end;">
+        <button id="loadBtn">Get Report</button>
+        <button class="secondary" id="downloadCsvBtn" disabled>Download CSV</button>
+      </div>
+      <div style="align-self:end;">
+        <div class="hint">Pro tip: leave Month empty to auto-use last month.</div>
+      </div>
+    </div>
+
+    <div id="result" class="grid" style="margin-top:16px; gap:16px;">
+      <!-- summary + table will appear here -->
+    </div>
+
+    <footer>Frontend is static — host as a Render <em>Static Site</em> with <code>frontend</code> as root. Backend must allow CORS (it does).</footer>
+  </div>
+
+  <script>
+    // ------------------ Config ------------------
+    // Default to current origin; you can override in the input
+    let API_BASE = window.location.origin;
+
+    // ------------------ Helpers ------------------
+    const $ = (id) => document.getElementById(id);
+    const fmtInt = (v) => (v == null ? "-" : Number(v).toLocaleString());
+    const fmtMoney = (v, ccy) => (v == null ? "-" : new Intl.NumberFormat(undefined, { style: 'currency', currency: ccy || 'USD', maximumFractionDigits: 2 }).format(Number(v)));
+    const fmtPct = (v) => (v == null ? "-" : (Number(v).toFixed(2) + "%"));
+    const toCsv = (rows) => {
+      if (!rows || !rows.length) return "";
+      const headers = Object.keys(rows[0]);
+      const esc = (x) => {
+        if (x == null) return "";
+        const s = String(x);
+        if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+        return s;
+      };
+      return [headers.join(","), ...rows.map(r => headers.map(h => esc(r[h])).join(","))].join("\n");
+    };
+    const monthInputDefault = () => {
+      const d = new Date();
+      d.setMonth(d.getMonth() - 1); // last month
+      return d.toISOString().slice(0,7);
+    };
+
+    function setStatusOK() {
+      $("healthStatus").textContent = "backend OK";
+      $("healthStatus").className = "status ok";
+    }
+    function setStatusERR(msg) {
+      $("healthStatus").textContent = "backend error";
+      $("healthStatus").className = "status err";
+      console.error(msg);
+    }
+
+    // ------------------ UI wiring ------------------
+    async function checkHealth() {
+      try {
+        const r = await fetch(API_BASE + "/health");
+        if (!r.ok) throw new Error("health HTTP " + r.status);
+        const j = await r.json();
+        if (j && j.ok) setStatusOK(); else setStatusERR(j);
+      } catch (e) {
+        setStatusERR(e);
+      }
+    }
+
+    async function loadAdAccounts() {
+      const sel = $("account");
+      sel.innerHTML = '<option value="">Loading…</option>';
+      try {
+        const r = await fetch(API_BASE + "/debug/ad-accounts");
+        if (!r.ok) throw new Error("ad-accounts HTTP " + r.status);
+        const j = await r.json();
+        const data = j?.data || j?.accounts || j || [];
+        sel.innerHTML = '<option value="">Select…</option>';
+        data.forEach(acc => {
+          const opt = document.createElement("option");
+          const id = acc.account_id || acc.id || "";
+          const name = acc.name || ("Account " + id);
+          const ccy = acc.currency || "";
+          opt.value = id;
+          opt.textContent = `${name} (${id}) ${ccy ? "• " + ccy : ""}`;
+          sel.appendChild(opt);
+        });
+      } catch (e) {
+        sel.innerHTML = '<option value="">Failed to load</option>';
+        console.error(e);
+      }
+    }
+
+    function renderSummary(container, account, since, until, summary) {
+      container.innerHTML = `
+        <div class="card">
+          <div class="row" style="justify-content:space-between; align-items:center;">
+            <div>
+              <div style="font-weight:700;">${account?.name || "Account"} (${account?.id || ""})</div>
+              <div class="hint">${since} → ${until} • Currency: ${account?.currency || "-"}</div>
+            </div>
+            <div class="row">
+              <span class="hint">Spend allocation</span>
+            </div>
+          </div>
+          <div class="kpis">
+            <div class="kpi"><div class="k">Spend</div><div class="v">${fmtMoney(summary.spend, account?.currency)}</div></div>
+            <div class="kpi"><div class="k">Impressions</div><div class="v">${fmtInt(summary.impressions)}</div></div>
+            <div class="kpi"><div class="k">Clicks</div><div class="v">${fmtInt(summary.clicks)}</div></div>
+            <div class="kpi"><div class="k">CTR</div><div class="v">${fmtPct(summary.ctr)}</div></div>
+            <div class="kpi"><div class="k">CPC</div><div class="v">${summary.cpc == null ? "-" : fmtMoney(summary.cpc, account?.currency)}</div></div>
+            <div class="kpi"><div class="k">CPM</div><div class="v">${summary.cpm == null ? "-" : fmtMoney(summary.cpm, account?.currency)}</div></div>
+            <div class="kpi"><div class="k">Purchases</div><div class="v">${fmtInt(summary.purchases)}</div></div>
+            <div class="kpi"><div class="k">Rev (purchase_value)</div><div class="v">${fmtMoney(summary.purchase_value, account?.currency)}</div></div>
+            <div class="kpi"><div class="k">CPA</div><div class="v">${summary.cpa == null ? "-" : fmtMoney(summary.cpa, account?.currency)}</div></div>
+            <div class="kpi"><div class="k">ROAS</div><div class="v">${summary.roas == null ? "-" : Number(summary.roas).toFixed(2)}x</div></div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderBreakdown(container, breakdown, currency, level) {
+      const cols = [
+        { key: "name", label: level.charAt(0).toUpperCase() + level.slice(1) },
+        { key: "spend", label: "Spend", fmt: (v)=>fmtMoney(v, currency) },
+        { key: "impressions", label: "Impr.", fmt: fmtInt },
+        { key: "reach", label: "Reach", fmt: fmtInt },
+        { key: "clicks", label: "Clicks", fmt: fmtInt },
+        { key: "ctr", label: "CTR", fmt: fmtPct },
+        { key: "cpc", label: "CPC", fmt: (v)=>v==null?"-":fmtMoney(v, currency) },
+        { key: "cpm", label: "CPM", fmt: (v)=>v==null?"-":fmtMoney(v, currency) },
+        { key: "purchases", label: "Purch.", fmt: fmtInt },
+        { key: "purchase_value", label: "Revenue", fmt: (v)=>fmtMoney(v, currency) },
+        { key: "cpa", label: "CPA", fmt: (v)=>v==null?"-":fmtMoney(v, currency) },
+        { key: "roas", label: "ROAS", fmt: (v)=>v==null?"-":Number(v).toFixed(2)+"x" }
+      ];
+
+      const table = document.createElement("div");
+      table.className = "card";
+      table.innerHTML = `
+        <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <div style="font-weight:700;">Breakdown by ${level}</div>
+          <div class="actions">
+            <button class="secondary" id="sortSpend">Sort by Spend</button>
+            <button class="secondary" id="sortROAS">Sort by ROAS</button>
+          </div>
+        </div>
+        <div class="table-wrap"><table id="dataTable">
+          <thead><tr>${cols.map(c=>`<th>${c.label}</th>`).join("")}</tr></thead>
+          <tbody>${renderRows(breakdown, cols)}</tbody>
+        </table></div>
+      `;
+      container.appendChild(table);
+
+      const tbody = table.querySelector("tbody");
+      table.querySelector("#sortSpend").onclick = () => {
+        breakdown.sort((a,b)=> (b.spend||0) - (a.spend||0));
+        tbody.innerHTML = renderRows(breakdown, cols);
+      };
+      table.querySelector("#sortROAS").onclick = () => {
+        breakdown.sort((a,b)=> (b.roas||0) - (a.roas||0));
+        tbody.innerHTML = renderRows(breakdown, cols);
+      };
+    }
+
+    function renderRows(rows, cols) {
+      return rows.map(r => `
+        <tr>
+          ${cols.map(c => `<td>${(c.fmt ? c.fmt(r[c.key]) : (r[c.key] ?? "-"))}</td>`).join("")}
+        </tr>
+      `).join("");
+    }
+
+    function downloadCsv(filename, rows) {
+      const csv = toCsv(rows);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    async function getReport(accountId, month, level) {
+      const u = new URL(API_BASE + "/reports/monthly");
+      u.searchParams.set("account_id", accountId);
+      if (month) u.searchParams.set("month", month);
+      if (level) u.searchParams.set("level", level);
+      const r = await fetch(u.toString());
+      if (!r.ok) throw new Error("report HTTP " + r.status);
+      return r.json();
+    }
+
+    function renderReport(json) {
+      const result = $("result");
+      result.innerHTML = "";
+
+      // summary card
+      const summaryWrap = document.createElement("div");
+      renderSummary(summaryWrap, json.account, json.since, json.until, json.summary);
+      result.appendChild(summaryWrap.firstElementChild);
+
+      // breakdown table
+      renderBreakdown(result, json.breakdown || [], json.account?.currency, json.level);
+
+      // enable CSV download
+      $("downloadCsvBtn").disabled = !json.breakdown || !json.breakdown.length;
+      $("downloadCsvBtn").onclick = () => {
+        const fname = `meta_report_${json.account?.id || "account"}_${json.since}_${json.until}_${json.level}.csv`;
+        // include both summary (as one row) and breakdown in the file — two separate CSV blocks
+        const summaryRow = [{ metric: "spend", value: json.summary.spend },
+                            { metric: "impressions", value: json.summary.impressions },
+                            { metric: "clicks", value: json.summary.clicks },
+                            { metric: "reach", value: json.summary.reach },
+                            { metric: "purchases", value: json.summary.purchases },
+                            { metric: "purchase_value", value: json.summary.purchase_value },
+                            { metric: "ctr", value: json.summary.ctr },
+                            { metric: "cpc", value: json.summary.cpc },
+                            { metric: "cpm", value: json.summary.cpm },
+                            { metric: "cpa", value: json.summary.cpa },
+                            { metric: "roas", value: json.summary.roas }];
+        const part1 = "Summary\n" + toCsv(summaryRow);
+        const part2 = "\n\nBreakdown\n" + toCsv(json.breakdown);
+        const blob = new Blob([part1 + part2], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = fname;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      };
+    }
+
+    // ------------------ Events ------------------
+    $("apiBase").value = API_BASE;
+    $("apiBase").addEventListener("change", async (e) => {
+      API_BASE = e.target.value.trim() || window.location.origin;
+      await checkHealth();
+      await loadAdAccounts();
+    });
+
+    $("month").value = monthInputDefault();
+
+    $("loadBtn").onclick = async () => {
+      const accountId = $("account").value.trim();
+      if (!accountId) { alert("Select an ad account"); return; }
+      const month = $("month").value.trim(); // can be empty
+      const level = $("level").value;
+      $("loadBtn").disabled = true;
+      $("loadBtn").textContent = "Loading…";
+      try {
+        const json = await getReport(accountId, month, level);
+        renderReport(json);
+      } catch (e) {
+        alert("Failed: " + (e?.message || e));
+        console.error(e);
+      } finally {
+        $("loadBtn").disabled = false;
+        $("loadBtn").textContent = "Get Report";
+      }
+    };
+
+    // ------------------ Init ------------------
+    (async function init() {
+      await checkHealth();
+      await loadAdAccounts();
+    })();
+  </script>
 </body>
 </html>
