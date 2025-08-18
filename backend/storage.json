@@ -1,3 +1,20 @@
 {
-  "notes": "placeholder file so the folder exists; not used for persistence on Render."
+  "views": {
+    "Revenue Results": {
+      "columns": [
+        { "key": "name",               "label": "Campaign",              "fmt": "text"  },
+        { "key": "frequency",          "label": "Frequency",             "fmt": "dec2"  },
+        { "key": "budget",             "label": "Budget",                "fmt": "money" },
+        { "key": "spend",              "label": "Amount Spent",          "fmt": "money" },
+        { "key": "link_clicks",        "label": "Link Clicks",           "fmt": "int"   },
+        { "key": "ctr",                "label": "CTR",                   "fmt": "pct"   },
+        { "key": "cpc",                "label": "CPC",                   "fmt": "money" },
+        { "key": "landing_page_views", "label": "Landing Page Views",    "fmt": "int"   },
+        { "key": "add_to_cart",        "label": "Adds to Cart",          "fmt": "int"   },
+        { "key": "initiate_checkout",  "label": "Checkouts",             "fmt": "int"   },
+        { "key": "purchases",          "label": "Purchases",             "fmt": "int"   },
+        { "key": "purchase_roas_api",  "label": "Purchase ROAS",         "fmt": "roas"  }
+      ]
+    }
+  }
 }
