@@ -8,7 +8,37 @@ if (!TOKEN) {
   console.warn("META_TOKEN is not set. On Render, set it in Environment Variables.");
 }
 
-// List ad accounts linked to the token user
+/* -------------------- helpers -------------------- */
+
+function monthRange(ym) {
+  const target = ym ? dayjs(ym + "-01") : dayjs().subtract(1, "month").startOf("month");
+  const since = target.startOf("month").format("YYYY-MM-DD");
+  const until = target.endOf("month").format("YYYY-MM-DD");
+  return { since, until };
+}
+
+function n(v) {
+  const x = Number(v);
+  return Number.isFinite(x) ? x : 0;
+}
+
+function safeDiv(a, b) {
+  const A = n(a), B = n(b);
+  return B > 0 ? A / B : null;
+}
+
+function pct(a, b) {
+  const r = safeDiv(a, b);
+  return r === null ? null : r * 100;
+}
+
+function pickActions(actions = [], type) {
+  const hit = actions.find(a => a.action_type === type);
+  return hit ? Number(hit.value || 0) : 0;
+}
+
+/* -------------------- account info -------------------- */
+
 export async function getAdAccounts() {
   const url = `${BASE}/me/adaccounts`;
   const params = {
@@ -20,26 +50,18 @@ export async function getAdAccounts() {
   return data;
 }
 
-// Build first/last day from YYYY-MM, default to last month if ym not provided
-function monthRange(ym) {
-  const target = ym ? dayjs(ym + "-01") : dayjs().subtract(1, "month").startOf("month");
-  const since = target.startOf("month").format("YYYY-MM-DD");
-  const until = target.endOf("month").format("YYYY-MM-DD");
-  return { since, until };
+export async function getAccountInfo(accountId) {
+  const url = `${BASE}/act_${accountId}`;
+  const params = {
+    access_token: TOKEN,
+    fields: "account_id,name,currency"
+  };
+  const { data } = await axios.get(url, { params });
+  return data; // { account_id, name, currency }
 }
 
-// Extract a specific action metric from actions array
-function pickActions(actions = [], type) {
-  const hit = actions.find(a => a.action_type === type);
-  return hit ? Number(hit.value || 0) : 0;
-}
+/* -------------------- raw insights -------------------- */
 
-/**
- * Fetch monthly insights for an ad account
- * @param {string} accountId - numeric id (no "act_" prefix)
- * @param {string} ym        - optional "YYYY-MM"; defaults to last month
- * @param {string} level     - "account" | "campaign" | "adset" | "ad"
- */
 export async function getMonthlyInsights({ accountId, ym, level = "account" }) {
   if (!accountId) throw new Error("accountId is required");
 
@@ -50,7 +72,7 @@ export async function getMonthlyInsights({ accountId, ym, level = "account" }) {
     access_token: TOKEN,
     time_range: JSON.stringify({ since, until }),
     time_increment: "all_days",
-    level,
+    level,                 // account | campaign | adset | ad
     limit: 500,
     fields: [
       "date_start",
@@ -92,13 +114,13 @@ export async function getMonthlyInsights({ accountId, ym, level = "account" }) {
       adset_name: r.adset_name,
       ad_id: r.ad_id,
       ad_name: r.ad_name,
-      spend: Number(r.spend || 0),
-      impressions: Number(r.impressions || 0),
-      clicks: Number(r.clicks || 0),
-      cpc: r.cpc ? Number(r.cpc) : null,
-      cpm: r.cpm ? Number(r.cpm) : null,
-      ctr: r.ctr ? Number(r.ctr) : null,
-      reach: r.reach ? Number(r.reach) : null,
+      spend: n(r.spend),
+      impressions: n(r.impressions),
+      clicks: n(r.clicks),
+      cpc: r.cpc != null ? n(r.cpc) : null,
+      cpm: r.cpm != null ? n(r.cpm) : null,
+      ctr: r.ctr != null ? n(r.ctr) : null,
+      reach: r.reach != null ? n(r.reach) : null,
       purchases,
       purchase_value: purchaseValue,
       purchase_roas: Array.isArray(r.purchase_roas) ? r.purchase_roas : null
@@ -111,5 +133,114 @@ export async function getMonthlyInsights({ accountId, ym, level = "account" }) {
     level,
     count: rows.length,
     data: rows
+  };
+}
+
+/* -------------------- aggregated report -------------------- */
+
+function rowName(row, level) {
+  if (level === "campaign") return row.campaign_name || row.campaign_id || "Unknown Campaign";
+  if (level === "adset")    return row.adset_name || row.adset_id || "Unknown Ad Set";
+  if (level === "ad")       return row.ad_name || row.ad_id || "Unknown Ad";
+  return row.account_name || row.account_id || "Account";
+}
+
+function rowId(row, level) {
+  if (level === "campaign") return row.campaign_id || "unknown_campaign";
+  if (level === "adset")    return row.adset_id || "unknown_adset";
+  if (level === "ad")       return row.ad_id || "unknown_ad";
+  return row.account_id || "account";
+}
+
+function deriveKpis({ spend, impressions, clicks, purchases, purchase_value }) {
+  const ctr = pct(clicks, impressions);
+  const cpc = safeDiv(spend, clicks);
+  const cpm = safeDiv(spend * 1000, impressions);
+  const cpa = safeDiv(spend, purchases);
+  const roas = safeDiv(purchase_value, spend);
+  return { ctr, cpc, cpm, cpa, roas };
+}
+
+export async function getMonthlyReport({ accountId, ym, level = "campaign", top = 1000 }) {
+  if (!accountId) throw new Error("accountId is required");
+
+  // fetch account meta (currency) for labeling
+  let acct = null;
+  try {
+    acct = await getAccountInfo(accountId);
+  } catch (_) {
+    acct = null; // continue even if this fails
+  }
+
+  // fetch raw rows for the chosen level
+  const raw = await getMonthlyInsights({ accountId, ym, level });
+
+  // aggregate summary
+  const totals = raw.data.reduce(
+    (acc, r) => {
+      acc.spend += n(r.spend);
+      acc.impressions += n(r.impressions);
+      acc.clicks += n(r.clicks);
+      acc.reach += n(r.reach);
+      acc.purchases += n(r.purchases);
+      acc.purchase_value += n(r.purchase_value);
+      return acc;
+    },
+    { spend: 0, impressions: 0, clicks: 0, reach: 0, purchases: 0, purchase_value: 0 }
+  );
+
+  const summary = {
+    spend: totals.spend,
+    impressions: totals.impressions,
+    clicks: totals.clicks,
+    reach: totals.reach,
+    purchases: totals.purchases,
+    purchase_value: totals.purchase_value,
+    ...deriveKpis(totals)
+  };
+
+  // build breakdown at requested level
+  const groupMap = new Map();
+  for (const r of raw.data) {
+    const id = rowId(r, level);
+    const name = rowName(r, level);
+    const g = groupMap.get(id) || {
+      id,
+      name,
+      spend: 0,
+      impressions: 0,
+      clicks: 0,
+      reach: 0,
+      purchases: 0,
+      purchase_value: 0
+    };
+    g.spend += n(r.spend);
+    g.impressions += n(r.impressions);
+    g.clicks += n(r.clicks);
+    g.reach += n(r.reach);
+    g.purchases += n(r.purchases);
+    g.purchase_value += n(r.purchase_value);
+    groupMap.set(id, g);
+  }
+
+  let breakdown = Array.from(groupMap.values())
+    .map(g => ({ ...g, ...deriveKpis(g) }))
+    .sort((a, b) => b.spend - a.spend);
+
+  if (Number.isFinite(top) && top > 0) {
+    breakdown = breakdown.slice(0, top);
+  }
+
+  return {
+    account: {
+      id: acct?.account_id || accountId,
+      name: acct?.name || null,
+      currency: acct?.currency || null
+    },
+    since: raw.since,
+    until: raw.until,
+    level,
+    summary,
+    breakdown
   };
 }
