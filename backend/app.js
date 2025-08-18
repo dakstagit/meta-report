@@ -10,7 +10,10 @@ import {
   getMonthlyReport
 } from "./meta.js";
 
+import OpenAI from "openai";   // NEW
+
 dotenv.config();
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY }); // NEW
 
 const app = express();
 app.use(cors());
@@ -83,14 +86,62 @@ app.get("/config/view", (req, res) => {
   const name = (req.query.name || "Revenue Results").trim();
   const store = loadStorage();
   const view = store.views?.[name];
-  // Always return 200 with an empty list if not found (no 404s here)
   res.json({ name, columns: Array.isArray(view?.columns) ? view.columns : [] });
+});
+
+// NEW: AI summary endpoint
+app.post("/summary/monthly", async (req, res) => {
+  try {
+    const { account, summary, breakdown, since, until } = req.body;
+    if (!account || !summary) {
+      return res.status(400).json({ error: "Missing data" });
+    }
+
+    const prompt = `
+You are a marketing consultant. Write a monthly ad performance summary.
+
+Account: ${account.name} (${account.id})
+Period: ${since} → ${until}
+Currency: ${account.currency}
+
+Key KPIs:
+Spend: ${summary.spend}
+Revenue: ${summary.purchase_value}
+ROAS: ${summary.roas}
+CTR: ${summary.ctr}
+CPC: ${summary.cpc}
+Purchases: ${summary.purchases}
+
+Top campaigns:
+${(breakdown||[]).slice(0,5).map(r =>
+  `${r.name}: Spend ${r.spend}, Purchases ${r.purchases}, ROAS ${r.purchase_roas_api || r.roas}, CTR ${r.ctr}`
+).join("\n")}
+
+Please provide:
+1. Executive summary
+2. Key wins
+3. Underperformers / issues
+4. Actionable recommendations for next month
+Use clear consultant-style language.
+    `;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.7,
+    });
+
+    res.json({ text: completion.choices[0].message.content.trim() });
+  } catch (err) {
+    console.error("AI summary error:", err);
+    res.status(500).json({ error: "AI summary failed" });
+  }
 });
 
 /* ------------------ STATIC FRONTEND AFTER API ------------------ */
 app.use(express.static(FRONTEND_DIR));
 
-// SPA fallback to index.html
+// SPA fallback
 app.get("*", (req, res) => {
   res.sendFile(path.join(FRONTEND_DIR, "index.html"));
 });
