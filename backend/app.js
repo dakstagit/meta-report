@@ -7,7 +7,8 @@ import { fileURLToPath } from "url";
 import {
   getAdAccounts,
   getMonthlyInsights,
-  getMonthlyReport
+  getMonthlyReport,
+  getWeeklyReport
 } from "./meta.js";
 
 dotenv.config();
@@ -111,6 +112,21 @@ app.get("/reports/monthly", async (req, res) => {
 
     // Bubble the real Meta message to the frontend (you already show it in an alert)
     res.status(500).json({ error: metaErr });
+  }
+});
+
+// NEW: weekly (last 7 days) aggregated report
+app.get("/reports/weekly", async (req, res) => {
+  try {
+    const { account_id, level, top } = req.query;
+    const result = await getWeeklyReport({
+      accountId: account_id,
+      level: level || "campaign",
+      top: top ? Number(top) : 1000
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err?.response?.data || err.message || "Unknown error" });
   }
 });
 
