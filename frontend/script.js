@@ -284,14 +284,21 @@ $("month").value = monthDefault();
 $("loadBtn").onclick = async () => {
   const accountId = $("account").value.trim();
   if (!accountId) { alert("Select an ad account"); return; }
+
+  const range = $("range").value;          // "month" or "last7"
   const month = $("month").value.trim();
   const level = $("level").value;
+
+  if (range === "month" && !month) {
+    alert("Select a month");
+    return;
+  }
 
   $("loadBtn").disabled = true;
   $("loadBtn").textContent = "Loading…";
   try{
     const view = await fetchView("Revenue Results");
-    const json = await getReport(accountId, month, level);
+    const json = await getReport(accountId, month, level, range);
     renderReport(json, view);
   }catch(e){
     if (e instanceof Response) await showAlertFromResponse(e);
@@ -302,6 +309,7 @@ $("loadBtn").onclick = async () => {
     $("loadBtn").textContent = "Get Report";
   }
 };
+
 
 (async function init(){
   await checkHealth();
