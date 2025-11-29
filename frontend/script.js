@@ -164,15 +164,17 @@ function renderRows(rows, cols){
   `).join("");
 }
 
-async function getReport(accountId, month, level){
-  const u = new URL((API_BASE || "") + "/reports/monthly", window.location.origin);
+async function getReport(accountId, month, level, range){
+  const path = range === "last7" ? "/reports/weekly" : "/reports/monthly";
+  const u = new URL((API_BASE || "") + path, window.location.origin);
   u.searchParams.set("account_id", accountId);
-  if (month) u.searchParams.set("month", month);
+  if (range === "month" && month) u.searchParams.set("month", month);
   if (level) u.searchParams.set("level", level);
   const r = await fetch(u.toString());
   if (!r.ok) throw r;
   return r.json();
 }
+
 
 // ---- AI Summary helpers ----
 async function makeAISummary(json) {
