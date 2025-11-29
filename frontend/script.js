@@ -1,15 +1,5 @@
 const API_BASE = ""; // same-origin
 
-// --- dropdown allowlist (your chosen six) ---
-const ALLOW_ACCOUNTS = [
-  "120084692730136",   // Annie Apple
-  "378944901066763",   // zoandcojewellery
-  "1175953690938138",  // CSARA
-  "679554724700799",   // Hidden Muse
-  "1918819531789094",  // Melrose Haus
-  "656509666932258"    // Celeste Collective UK
-];
-
 const $ = id => document.getElementById(id);
 const fmtInt = v => (v == null ? "-" : Number(v).toLocaleString());
 const fmtMoney = (v, ccy) => (v == null ? "-" : new Intl.NumberFormat(undefined,{style:"currency",currency:ccy||"USD",maximumFractionDigits:2}).format(Number(v)));
@@ -59,7 +49,7 @@ async function loadAdAccounts(){
     const j = await fetchJSON(API_BASE + "/debug/ad-accounts");
     const all = j?.data || [];
 
-    const allowed = all.filter(acc => ALLOW_ACCOUNTS.includes(String(acc.account_id)));
+    const allowed = all; // show ALL accounts returned by the API
     const order = Object.fromEntries(ALLOW_ACCOUNTS.map((id,i)=>[id,i]));
     allowed.sort((a,b) => (order[a.account_id] ?? 9999) - (order[b.account_id] ?? 9999));
 
