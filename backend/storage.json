@@ -16,5 +16,6 @@
         { "key": "purchase_roas_api",  "label": "Purchase ROAS",         "fmt": "roas"  }
       ]
     }
-  }
+  },
+  "cache": {}
 }
