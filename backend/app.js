@@ -76,21 +76,44 @@ app.get("/insights/monthly", async (req, res) => {
   }
 });
 
-// aggregated report
+// aggregated report with disk cache to avoid Meta rate limits
 app.get("/reports/monthly", async (req, res) => {
   try {
     const { account_id, month, level, top } = req.query;
+    const lvl = level || "campaign";
+    const key = cacheKey({ accountId: account_id, ym: month, level: lvl });
+
+    const store = loadStorage();
+    const now = Date.now();
+    const TTL_MS = 1000 * 60 * 60 * 6; // 6 hours cache
+
+    const existing = store.cache[key];
+    if (existing && now - existing.timestamp < TTL_MS) {
+      // serve cached report, zero Meta calls
+      return res.json(existing.data);
+    }
+
+    // not cached or stale -> call Meta once
     const result = await getMonthlyReport({
       accountId: account_id,
       ym: month,
-      level: level || "campaign",
+      level: lvl,
       top: top ? Number(top) : 1000
     });
+
+    // save to cache
+    store.cache[key] = { timestamp: now, data: result };
+    saveStorage(store);
+
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err?.response?.data || err.message || "Unknown error" });
+    const metaErr = err?.response?.data || err.message || "Unknown error";
+
+    // Bubble the real Meta message to the frontend (you already show it in an alert)
+    res.status(500).json({ error: metaErr });
   }
 });
+
 
 // view config (defaults to “Revenue Results”)
 app.get("/config/view", (req, res) => {
