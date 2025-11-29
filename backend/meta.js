@@ -16,6 +16,14 @@ function monthRange(ym) {
   const until = target.endOf("month").format("YYYY-MM-DD");
   return { since, until };
 }
+
+// NEW: last N days range (Meta default style: yesterday as end date)
+function lastNDaysRange(days = 7) {
+  const until = dayjs().subtract(1, "day").format("YYYY-MM-DD");   // yesterday
+  const since = dayjs().subtract(days, "day").format("YYYY-MM-DD");
+  return { since, until };
+}
+
 const n = v => {
   const x = Number(v);
   return Number.isFinite(x) ? x : 0;
@@ -46,10 +54,9 @@ export async function getAccountInfo(accountId) {
   return data;
 }
 
-/* ---------- raw insights ---------- */
-export async function getMonthlyInsights({ accountId, ym, level = "account" }) {
+/* ---------- shared raw insights for any date range ---------- */
+async function fetchInsights({ accountId, since, until, level = "account" }) {
   if (!accountId) throw new Error("accountId is required");
-  const { since, until } = monthRange(ym);
 
   const url = `${BASE}/act_${accountId}/insights`;
   const params = {
@@ -66,7 +73,7 @@ export async function getMonthlyInsights({ accountId, ym, level = "account" }) {
       "ad_id","ad_name",
       "spend","impressions","clicks","cpc","cpm","ctr","reach",
       "frequency",
-      "inline_link_clicks",           // <-- valid field
+      "inline_link_clicks",
       "actions","action_values",
       "purchase_roas"
     ].join(",")
@@ -139,6 +146,19 @@ export async function getMonthlyInsights({ accountId, ym, level = "account" }) {
 
   return { since, until, level, count: rows.length, data: rows };
 }
+
+/* ---------- raw insights entrypoints ---------- */
+export async function getMonthlyInsights({ accountId, ym, level = "account" }) {
+  const { since, until } = monthRange(ym);
+  return fetchInsights({ accountId, since, until, level });
+}
+
+// NEW: last 7 days insights
+export async function getLast7Insights({ accountId, level = "account" }) {
+  const { since, until } = lastNDaysRange(7);
+  return fetchInsights({ accountId, since, until, level });
+}
+
 
 /* ---------- aggregated report ---------- */
 function nameFor(row, level) {
@@ -263,3 +283,90 @@ export async function getMonthlyReport({ accountId, ym, level = "campaign", top 
     breakdown
   };
 }
+
+// NEW: weekly (last 7 days) aggregated report
+export async function getWeeklyReport({ accountId, level = "campaign", top = 1000 }) {
+  const acct = await getAccountInfo(accountId).catch(() => null);
+  const raw = await getLast7Insights({ accountId, level });
+
+  const totals = raw.data.reduce((acc, r) => {
+    acc.spend += n(r.spend);
+    acc.impressions += n(r.impressions);
+    acc.clicks += n(r.clicks);
+    acc.reach += n(r.reach);
+    acc.purchases += n(r.purchases);
+    acc.purchase_value += n(r.purchase_value);
+    acc.link_clicks += n(r.link_clicks);
+    acc.landing_page_views += n(r.landing_page_views);
+    acc.add_to_cart += n(r.add_to_cart);
+    acc.initiate_checkout += n(r.initiate_checkout);
+    return acc;
+  }, {
+    spend:0, impressions:0, clicks:0, reach:0, purchases:0, purchase_value:0,
+    link_clicks:0, landing_page_views:0, add_to_cart:0, initiate_checkout:0
+  });
+
+  const summary = { ...totals, ...deriveKpis(totals) };
+  summary.frequency = safeDiv(summary.impressions, summary.reach);
+
+  const map = new Map();
+  for (const r of raw.data) {
+    const id = idFor(r, level);
+    const name = nameFor(r, level);
+    const g = map.get(id) || {
+      id, name,
+      spend:0, impressions:0, clicks:0, reach:0, purchases:0, purchase_value:0,
+      link_clicks:0, landing_page_views:0, add_to_cart:0, initiate_checkout:0,
+      purchase_roas_api_vals: []
+    };
+    g.spend += n(r.spend);
+    g.impressions += n(r.impressions);
+    g.clicks += n(r.clicks);
+    g.reach += n(r.reach);
+    g.purchases += n(r.purchases);
+    g.purchase_value += n(r.purchase_value);
+    g.link_clicks += n(r.link_clicks);
+    g.landing_page_views += n(r.landing_page_views);
+    g.add_to_cart += n(r.add_to_cart);
+    g.initiate_checkout += n(r.initiate_checkout);
+
+    if (r.purchase_roas_api != null) g.purchase_roas_api_vals.push(Number(r.purchase_roas_api));
+    map.set(id, g);
+  }
+
+  let budgets = {};
+  if (level === "campaign" || level === "adset") {
+    const ids = Array.from(map.keys());
+    budgets = await fetchBudgets(level, ids);
+  }
+
+  let breakdown = Array.from(map.values()).map(g => {
+    const kpis = { ...g, ...deriveKpis(g) };
+    kpis.frequency = safeDiv(kpis.impressions, kpis.reach);
+    if (g.purchase_roas_api_vals.length) {
+      const sum = g.purchase_roas_api_vals.reduce((a,b)=>a+b,0);
+      kpis.purchase_roas_api = sum / g.purchase_roas_api_vals.length;
+    } else {
+      kpis.purchase_roas_api = safeDiv(kpis.purchase_value, kpis.spend);
+    }
+    kpis.budget = budgets[g.id] ?? null;
+    delete kpis.purchase_roas_api_vals;
+    return kpis;
+  }).sort((a,b)=>b.spend-a.spend);
+
+  if (Number.isFinite(top) && top>0) breakdown = breakdown.slice(0, top);
+
+  return {
+    account: acct ? {
+      id: acct.account_id,
+      name: acct.name,
+      currency: acct.currency
+    } : { id: accountId, name: `Account ${accountId}`, currency: "USD" },
+    since: raw.since,
+    until: raw.until,
+    level,
+    summary,
+    breakdown
+  };
+}
+
