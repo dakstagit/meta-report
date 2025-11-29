@@ -105,24 +105,78 @@ app.post("/summary/monthly", async (req, res) => {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
     // Ask the model to return clean HTML (not Markdown)
-    const prompt = `
-You are a senior marketing consultant. Generate a monthly ad performance report as clean HTML only.
+        const prompt = `
+You are an experienced performance marketer writing a monthly Meta ads report as clean HTML only.
 No code fences, no <html> or <body> wrappers, just semantic HTML inside a single fragment.
 
-Use these sections:
+GLOBAL BENCHMARKS (FOLLOW THESE STRICTLY):
+- ROAS (ecommerce typical ranges):
+  * ROAS < 1.0  = very poor / loss making
+  * 1.0–2.0     = weak / needs fixing
+  * 2.0–3.0     = below average / needs improvement
+  * 3.0–5.0     = solid / good
+  * 5.0–10.0    = very strong / excellent
+  * > 10.0      = exceptional / outstanding
+- CTR:
+  * < 0.7%      = weak
+  * 0.7–1.5%    = okay / average
+  * 1.5–3%      = good
+  * > 3%        = very strong
+- Never call a campaign with ROAS ≥ 5.0 "bad", "weak", "inefficient" or "underperforming".
+  You may say it has limited scale if spend is low, but not that performance is poor.
+
+DEFINITION OF TRUE UNDERPERFORMANCE:
+Treat a campaign/ad/ad set as an underperformer ONLY if BOTH are true:
+1) It has meaningful spend (at least 5% of total account spend OR clearly non-trivial spend).
+2) AND at least ONE of these holds:
+   - ROAS < 2.0, OR
+   - ROAS is at least 30% below the account's overall ROAS, OR
+   - CTR is clearly weak (< 0.7%) and below the account average, OR
+   - CPC is much higher than the account average and performance is not compensating for it.
+
+If, after applying these rules, there are NO true underperformers:
+- DO NOT include any "Underperformers" section at all.
+- Do not invent fake problems.
+- Instead, in the main summary and recommendations, state clearly that performance was broadly strong
+  and focus on how to safely scale winners, manage frequency, and add new tests.
+
+STRUCTURE RULES:
+- If there ARE underperformers, use the three-section structure below.
+- If there are NO underperformers, OMIT the "Underperformers / Issues" section entirely
+  (no <h3>Underperformers / Issues</h3>, no bullets for it).
+
+When you DO include the section, keep it factual and grounded in the metrics.
+
+TARGET HTML STRUCTURE:
+
 <h2>Monthly Performance Summary</h2>
-<p>One-paragraph executive overview with spend, revenue, ROAS, CTR, CPC, purchases.</p>
+<p>
+One-paragraph executive overview with spend, revenue, ROAS, CTR, CPC, purchases.
+Mention explicitly if the month was overall strong and if there were or were not any major underperformers.
+</p>
 
 <h3>Key Wins</h3>
-<ul>3–5 concise bullets with specific numbers and impact.</ul>
+<ul>
+3–5 concise bullets highlighting the strongest campaigns/ad sets by a mix of ROAS and volume.
+Always treat very high ROAS (e.g. > 5x, especially > 10x) as clear wins.
+</ul>
 
+[OPTIONAL SECTION – INCLUDE ONLY IF THERE ARE TRUE UNDERPERFORMERS]
 <h3>Underperformers / Issues</h3>
-<ul>3–5 bullets; call out high-spend low-ROAS items and any fatigue (high frequency).</ul>
+<ul>
+Only list items that match the "true underperformance" rules above.
+Do NOT criticise high-ROAS campaigns; if they have issues, frame them as scale/fatigue, not bad results.
+If there are no true underperformers, skip this entire heading and list.
+</ul>
 
 <h3>Actionable Recommendations for Next Month</h3>
-<ul>Specific, practical steps: budget shifts, creative tests, audiences, pacing, frequency controls.</ul>
-
-Format numbers human-readably (currency with symbol, 2 decimals, percentages). Do not invent data—use exactly what's provided.
+<ul>
+- If performance was strong overall: focus on scaling top performers, testing new creatives/audiences,
+  protecting performance (frequency control, budget pacing), and diversification.
+- If there were true underperformers: include specific, practical fixes (budget shifts away from weak
+  campaigns, pausing clearly bad ones, and what to test instead).
+- Base recommendations on spend, ROAS, CTR, CPC, purchases and frequency; do not give generic advice.
+</ul>
 
 DATA:
 Account: ${account.name} (${account.id})
@@ -143,11 +197,13 @@ ${(breakdown || []).slice(0, 10).map(r =>
 ).join("\n")}
     `.trim();
 
-    const completion = await openai.chat.completions.create({
+
+      const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }],
-      temperature: 0.6
+      temperature: 0.2  // more literal, less bullshit
     });
+
 
     const html = completion.choices[0].message.content.trim();
     res.json({ html });
