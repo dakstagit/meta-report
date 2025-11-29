@@ -49,28 +49,36 @@ async function loadAdAccounts(){
     const j = await fetchJSON(API_BASE + "/debug/ad-accounts");
     const all = j?.data || [];
 
-    const allowed = all; // show ALL accounts returned by the API
-    const order = Object.fromEntries(ALLOW_ACCOUNTS.map((id,i)=>[id,i]));
-    allowed.sort((a,b) => (order[a.account_id] ?? 9999) - (order[b.account_id] ?? 9999));
+    // show ALL accounts and sort by name
+    const allowed = all.slice().sort((a, b) => {
+      const an = (a.name || "").toLowerCase();
+      const bn = (b.name || "").toLowerCase();
+      if (an < bn) return -1;
+      if (an > bn) return 1;
+      return 0;
+    });
 
     sel.innerHTML = '<option value="">Select…</option>';
-    allowed.forEach(acc=>{
+    allowed.forEach(acc => {
       const id = acc.account_id || acc.id;
       const name = acc.name || ("Account " + id);
       const ccy = acc.currency || "";
       const opt = document.createElement("option");
       opt.value = id;
-      opt.textContent = `${name} (${id}) ${ccy ? "• "+ccy : ""}`;
+      opt.textContent = `${name} (${id}) ${ccy ? "• " + ccy : ""}`;
       sel.appendChild(opt);
     });
 
-    if (!allowed.length) sel.innerHTML = '<option value="">No allowed accounts found</option>';
-  }catch(e){
+    if (!allowed.length) {
+      sel.innerHTML = '<option value="">No accounts found</option>';
+    }
+  } catch (e) {
     if (e instanceof Response) await showAlertFromResponse(e);
     console.error(e);
     sel.innerHTML = '<option value="">Failed to load</option>';
   }
 }
+
 
 async function fetchView(name="Revenue Results"){
   const u = new URL((API_BASE||"") + "/config/view", window.location.origin);
