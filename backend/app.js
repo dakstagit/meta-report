@@ -26,11 +26,25 @@ const STORAGE_PATH = path.resolve(__dirname, "./storage.json");
 function loadStorage() {
   try {
     const raw = fs.readFileSync(STORAGE_PATH, "utf8");
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (!parsed.views) parsed.views = {};
+    if (!parsed.cache) parsed.cache = {};
+    return parsed;
   } catch {
-    return { views: {} };
+    // default structure
+    return { views: {}, cache: {} };
   }
 }
+
+function saveStorage(store) {
+  fs.writeFileSync(STORAGE_PATH, JSON.stringify(store, null, 2), "utf8");
+}
+
+// key for caching per account + month + level
+function cacheKey({ accountId, ym, level }) {
+  return `${accountId || "na"}_${ym || "latest"}_${level || "campaign"}`;
+}
+
 
 /* ------------ API ROUTES FIRST (avoid static hijacking) ------------ */
 
