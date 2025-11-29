@@ -52,9 +52,14 @@
         <select id="account"><option value="">Loading…</option></select>
       </div>
       <div>
-        <label for="month">Month (YYYY-MM)</label>
-        <input id="month" type="month" />
-      </div>
+  <label for="range">Period</label>
+  <select id="range">
+    <option value="month">Month (pick below)</option>
+    <option value="last7">Last 7 days</option>
+  </select>
+  <input id="month" type="month" style="margin-top:6px;" />
+</div>
+
       <div style="align-self:end">
         <label for="level">Level</label>
         <select id="level">
