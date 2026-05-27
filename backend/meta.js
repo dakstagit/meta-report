@@ -2,7 +2,7 @@ import axios from "axios";
 import dayjs from "dayjs";
 
 // Use the version your account list showed
-const BASE = "https://graph.facebook.com/v23.0";
+const BASE = "https://graph.facebook.com/v25.0";
 const TOKEN = process.env.META_TOKEN;
 
 if (!TOKEN) {
